@@ -47,7 +47,8 @@ for(row in (1:nrow(fedYieldCurveModern))){
   spread_table[[row]] = spread
 }
 
-#The xts containing spread data
+#The xts containing spread data, spread is distance from actual yield
+#to the yield modeled by Nelson Siegel
 big_table <- do.call(rbind,spread_table)
 
 #This function takes 
@@ -86,6 +87,7 @@ arbs3_09_17 = findArbsRelVal(1, 3, big_table, fedYieldCurveModern, 0.04, 0.04, 0
 arbs4_09_17 = findArbsRelVal(1, 3, big_table, fedYieldCurveModern, 0.03, 0.03, 0.01)
 arbs5_09_17 = findArbsRelVal(1, 3, big_table, fedYieldCurveModern, 0.02, 0.02, 0.005)
 arbs6_09_17 = findArbsRelVal(1, 3, big_table, fedYieldCurveModern, 0.01, 0.01, 0.005)
+arbs7_09_17 = findArbsRelVal(1, 3, big_table, fedYieldCurveModern, 0.01, 0.01, 0.02)
 
 #This function takes 
 #-df_arbs, xts of yield curves where arbitrage opportunities exist
@@ -96,8 +98,6 @@ arbs6_09_17 = findArbsRelVal(1, 3, big_table, fedYieldCurveModern, 0.01, 0.01, 0
 #returns a xts with 
 #row x column n being change of rates of trade x of maturity 1 at time n
 #row x column 2n being change of rates of trade x of maturity 2 at time n
-#Note to self, make sure to take care of the edge case where
-#timeFrame goes further than we have data for
 trackArbOpps <- function(df_arbs, df_yields, timeFrame, mat1, mat2){
   index = index(df_arbs)#the index of our returned xts needs to match the index tracking
   #our arb opportunities; our trades are tracked by the date which we execute them
@@ -107,6 +107,10 @@ trackArbOpps <- function(df_arbs, df_yields, timeFrame, mat1, mat2){
     sliced_df_yields = df_yields[paste(orig_curve_date,"/")]#create a smaller xts starting with the yield curve where the trade is executed
     i = 2
     while(i <= timeFrame+1){#put the rates over the specified timeframe into our xts
+      if(i-1 > nrow(sliced_df_yields)){#if timeFrame goes further than we have data for
+        #stop adding to the dataframe, just have NAs in place 
+        break
+      }
       coreMatrix[row, 2*(i-1)-1] = sliced_df_yields[i-1,mat1]
       coreMatrix[row, 2*(i-1)] = sliced_df_yields[i-1, mat2]
       i = i + 1
@@ -122,6 +126,7 @@ arbs3_09_17_opps = trackArbOpps(arbs3_09_17, fedYieldCurveModern, 5, 1, 3)
 arbs4_09_17_opps = trackArbOpps(arbs4_09_17, fedYieldCurveModern, 5, 1, 3)
 arbs5_09_17_opps = trackArbOpps(arbs5_09_17, fedYieldCurveModern, 5, 1, 3)
 arbs6_09_17_opps = trackArbOpps(arbs6_09_17, fedYieldCurveModern, 5, 1, 3)
+arbs7_09_17_opps = trackArbOpps(arbs7_09_17, fedYieldCurveModern, 5, 1, 3)
 
 #This function takes
 #- an xts tracking the yield rates over time of a trade
@@ -152,6 +157,7 @@ arbs3_09_17_opps_spreads = arbSpreadCalc(arbs3_09_17_opps)
 arbs4_09_17_opps_spreads = arbSpreadCalc(arbs4_09_17_opps)
 arbs5_09_17_opps_spreads = arbSpreadCalc(arbs5_09_17_opps)
 arbs6_09_17_opps_spreads = arbSpreadCalc(arbs6_09_17_opps)
+arbs7_09_17_opps_spreads = arbSpreadCalc(arbs7_09_17_opps)
 
 #This function
 #-takes a xts containing the spread value of each day we are in the trade
@@ -160,22 +166,22 @@ arbs6_09_17_opps_spreads = arbSpreadCalc(arbs6_09_17_opps)
 #average loss, standard deviation of trade returns, number of trades taken
 tradePerformance <- function(arb_spreads){
   df <- data.frame(matrix(ncol = 7, nrow = 1))
-  print(ncol(df))
+  #print(ncol(df))
   headers <- c("Avg Trade Perf.", "Win %", "Avg Win", "Loss %", "Avg Loss", "Std. Dev", "Num. of Trades")
   colnames(df) <- headers
   #trade_perf is a one column xts representing net change in basis points of your trade
   #which is entry spread value - exit spread value
   trade_perf <- arb_spreads[,1]-arb_spreads[,ncol(arb_spreads)]
-  avg_trade <- mean(trade_perf)
-  win_percent <- mean(trade_perf > 0)
+  avg_trade <- mean(trade_perf, na.rm = TRUE)
+  win_percent <- mean(trade_perf > 0, na.rm = TRUE)
   winning_trades <- trade_perf[,1] > 0
   win_trades <- trade_perf[winning_trades]
-  avg_win <- mean(win_trades)
+  avg_win <- mean(win_trades, na.rm = TRUE)
   loss_percent = 1 - win_percent
   losing_trades <- trade_perf[,1] <= 0
   lose_trades <- trade_perf[losing_trades]
-  avg_loss <- mean(lose_trades)
-  std_dev <- sd(trade_perf)
+  avg_loss <- mean(lose_trades, na.rm = TRUE)
+  std_dev <- sd(trade_perf, na.rm = TRUE)
   num_trades <- nrow(trade_perf)
   stats <- c(avg_trade, win_percent, avg_win, loss_percent, avg_loss, std_dev, num_trades)
   df[1,] <- stats
@@ -188,9 +194,54 @@ print(tradePerformance(arbs3_09_17_opps_spreads))
 print(tradePerformance(arbs4_09_17_opps_spreads))
 print(tradePerformance(arbs5_09_17_opps_spreads))
 print(tradePerformance(arbs6_09_17_opps_spreads))
-#loop that we can use to automate the testing oprint(tradePerformance(arbs09_17_opps_spreads))f many different relative value
+print(tradePerformance(arbs7_09_17_opps_spreads))
+
+results_list = list()
+
+results_list[[1]] = tradePerformance(arbs09_17_opps_spreads)
+results_list[[2]] = tradePerformance(arbs2_09_17_opps_spreads)
+results_list[[3]] = tradePerformance(arbs3_09_17_opps_spreads)
+results_list[[4]] = tradePerformance(arbs4_09_17_opps_spreads)
+results_list[[5]] = tradePerformance(arbs5_09_17_opps_spreads)
+results_list[[6]] = tradePerformance(arbs6_09_17_opps_spreads)
+results_list[[7]] = tradePerformance(arbs7_09_17_opps_spreads)
+
+#This function takes a 
+#-list of backtest results
+#-filename as a string
+#and exports a csv containing all the results
+exportResults <- function(listOfResults, fileName){
+  results = list()
+  for(i in (1:length(listOfResults))){
+    curr_list = listOfResults[[i]]
+    print(class(curr_list))
+    results[[i]] = curr_list[1,]
+  }
+  final_results = do.call(rbind, results)
+  colnames(final_results) = names(listOfResults[[1]])
+  write.csv(final_results, file = fileName)
+}
+
+exportResults(results_list, "firstBacktest.csv")
+
+#loop that we can use to automate the testing of many different relative value
 #yield curve arbitrages at once
 #Note to self, should make a rel val arb opp detector function
 
 arb_opps_spreads = list()
 plot_curves(fedYieldCurveModern["2017-12-22",], maturities)
+
+#This function takes
+#-df_yields, an xts of yield curves
+#-mat1spread (>0) is the minimum desired magnitude of difference from the modeled yield curve
+#-mat2spread (>0) is the minimum desired magnitude of difference from the modeled yield curve
+#-midspread (>0) is the maximum desired magnitude of difference from the yield curve of the maturity in the middle
+#-mat1spread and mat2spread should have different signs
+#-midspread should be small
+#and returns
+#-a list of xts 
+#-each xts contains yield curves where arb opportunities exist in the mat1 and mat 2 values
+#1-3,2-4,3-5....28-30
+arbDetector <- function(df_yields, mat1spread, mat2spread, midspread){
+  
+}
