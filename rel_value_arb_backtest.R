@@ -5,6 +5,9 @@ library(Quandl)
 fedYieldCurve <- Quandl('FED/SVENPY', type = "xts")
 
 fedYieldCurveModern <- fedYieldCurve["2009/2017"]
+fedYieldCurveLostDecade <- fedYieldCurve["2000/2008"]
+fedYieldCurve90sBull <- fedYieldCurve["1990/1999"]
+fedYieldCurve80s <- fedYieldCurve["1980/1989"]#note, the maturities only go up to 15 years here for early 80s, so we only test 1 to 15 year maturities
 
 #Graph the observed Fed Yield curve at 1981-12-31 and the fitted yield curve
 #using the Nelson Siegel model
@@ -31,9 +34,14 @@ plot_curves <- function(rates, maturities){
 }
 
 plot_curves(fedYieldCurveModern[2,],maturities)
+plot_curves(fedYieldCurveModern[1,],maturities)
 
 #Build the xts containing spread data
 spread_table <- list()
+spread_table_lost_decade <- list()
+spread_table_90s_bull <- list()
+spread_table_80s <- list()
+
 
 #This block of code takes a long time to run (approx 10 min) consider loading big_table
 #into a csv if you dont want to do this every single time
@@ -47,9 +55,37 @@ for(row in (1:nrow(fedYieldCurveModern))){
   spread_table[[row]] = spread
 }
 
+for(row in (1:nrow(fedYieldCurveLostDecade))){
+  rates = fedYieldCurveLostDecade[row,]
+  NSParams = Nelson.Siegel(rates, maturities)
+  NSRates = NSrates(NSParams, maturities)
+  spread = rates - NSRates
+  spread_table_lost_decade[[row]] = spread
+}
+
+for(row in (1:nrow(fedYieldCurve90sBull))){
+  rates = fedYieldCurve90sBull[row,]
+  NSParams = Nelson.Siegel(rates, maturities)
+  NSRates = NSrates(NSParams, maturities)
+  spread = rates - NSRates
+  spread_table_90s_bull[[row]] = spread
+}
+
+maturities_80s <- c(1:15)
+for(row in (1:nrow(fedYieldCurve80s))){
+  rates = fedYieldCurve80s[row,c(1:15)]
+  NSParams = Nelson.Siegel(rates, maturities_80s)
+  NSRates = NSrates(NSParams, maturities_80s)
+  spread = rates - NSRates
+  spread_table_80s[[row]] = spread
+}
+
 #The xts containing spread data, spread is distance from actual yield
 #to the yield modeled by Nelson Siegel
 big_table <- do.call(rbind,spread_table)
+big_table_lost_decade <- do.call(rbind, spread_table_lost_decade)
+big_table_90s_bull <- do.call(rbind, spread_table_90s_bull)
+big_table_80s <- do.call(rbind, spread_table_80s)
 
 #This function takes 
 #-two maturities mat1 and mat2(are two periods apart)
@@ -233,6 +269,7 @@ plot_curves(fedYieldCurveModern["2017-12-22",], maturities)
 
 #This function takes
 #-df_yields, an xts of yield curves
+#-df_spreads, an xts of spreads
 #-mat1spread (>0) is the minimum desired magnitude of difference from the modeled yield curve
 #-mat2spread (>0) is the minimum desired magnitude of difference from the modeled yield curve
 #-midspread (>0) is the maximum desired magnitude of difference from the yield curve of the maturity in the middle
@@ -242,6 +279,185 @@ plot_curves(fedYieldCurveModern["2017-12-22",], maturities)
 #-a list of xts 
 #-each xts contains yield curves where arb opportunities exist in the mat1 and mat 2 values
 #1-3,2-4,3-5....28-30
-arbDetector <- function(df_yields, mat1spread, mat2spread, midspread){
-  
+arbDetector <- function(df_yields, df_spreads,  mat1spread, mat2spread, midspread){
+  year_struc <- list()#will be a list of length 28, entry 1 is 1-3 trade, entry 2 is 2-4 trade, etc.
+  for(i in (1:28)){
+    print(i)
+    struc = findArbsRelVal(i, i+2, df_spreads, df_yields, mat1spread, mat2spread, midspread)
+    #print(class(struc))
+    if(is.null(struc)){#if no trades were available for that specific structure
+      struc = 0
+    }
+    year_struc[[i]] = struc
+    names(year_struc)[i] = paste(i, i + 2, sep = "-")
+    print(class(year_struc[[i]]))
+  }
+  return(year_struc)
 }
+
+rel_val_arbs_all_strucs <- arbDetector(fedYieldCurveModern, big_table, 0.03, 0.03, 0.01)
+
+#workflow
+#get the xts where each observation is a yield curve where a rel val arb opp exists
+#track the curves
+#calculate trade performance
+
+#Second backtest 2018-01-17
+#Independent variable is midspread
+midspread = 0.005#we start with half of a basis point as our midspread (distance from Nelson Siegel)
+#done on 1 and 3 year bonds
+arbs_mid_1 <- findArbsRelVal(3,5,big_table, fedYieldCurveModern, 0.07, 0.07, midspread)
+arbs_mid_2 <- findArbsRelVal(3,5,big_table, fedYieldCurveModern, 0.07, 0.07, 2*midspread)
+arbs_mid_3 <- findArbsRelVal(3,5,big_table, fedYieldCurveModern, 0.07, 0.07, 3*midspread)
+arbs_mid_4 <- findArbsRelVal(3,5,big_table, fedYieldCurveModern, 0.07, 0.07, 4*midspread)
+arbs_mid_5 <- findArbsRelVal(3,5,big_table, fedYieldCurveModern, 0.07, 0.07, 5*midspread)
+arbs_mid_6 <- findArbsRelVal(3,5,big_table, fedYieldCurveModern, 0.07, 0.07, 6*midspread)
+arbs_mid_7 <- findArbsRelVal(3,5,big_table, fedYieldCurveModern, 0.07, 0.07, 7*midspread)
+arbs_mid_8 <- findArbsRelVal(3,5,big_table, fedYieldCurveModern, 0.07, 0.07, 8*midspread)
+
+arbs_mid_1_opps <- trackArbOpps(arbs_mid_1, fedYieldCurveModern, 5, 2, 4)
+arbs_mid_2_opps <- trackArbOpps(arbs_mid_2, fedYieldCurveModern, 5, 2, 4)
+arbs_mid_3_opps <- trackArbOpps(arbs_mid_3, fedYieldCurveModern, 5, 2, 4)
+arbs_mid_4_opps <- trackArbOpps(arbs_mid_4, fedYieldCurveModern, 5, 2, 4)
+arbs_mid_5_opps <- trackArbOpps(arbs_mid_5, fedYieldCurveModern, 5, 2, 4)
+arbs_mid_6_opps <- trackArbOpps(arbs_mid_6, fedYieldCurveModern, 5, 2, 4)
+arbs_mid_7_opps <- trackArbOpps(arbs_mid_7, fedYieldCurveModern, 5, 2, 4)
+arbs_mid_8_opps <- trackArbOpps(arbs_mid_8, fedYieldCurveModern, 5, 2, 4)
+
+arbs_mid_1_opps_spreads <- arbSpreadCalc(arbs_mid_1_opps)
+arbs_mid_2_opps_spreads <- arbSpreadCalc(arbs_mid_2_opps)
+arbs_mid_3_opps_spreads <- arbSpreadCalc(arbs_mid_3_opps)
+arbs_mid_4_opps_spreads <- arbSpreadCalc(arbs_mid_4_opps)
+arbs_mid_5_opps_spreads <- arbSpreadCalc(arbs_mid_5_opps)
+arbs_mid_6_opps_spreads <- arbSpreadCalc(arbs_mid_6_opps)
+arbs_mid_7_opps_spreads <- arbSpreadCalc(arbs_mid_7_opps)
+arbs_mid_8_opps_spreads <- arbSpreadCalc(arbs_mid_8_opps)
+
+results_list_mid = list()
+
+results_list_mid[[1]] = tradePerformance(arbs_mid_1_opps_spreads)
+results_list_mid[[2]] = tradePerformance(arbs_mid_2_opps_spreads)
+results_list_mid[[3]] = tradePerformance(arbs_mid_3_opps_spreads)
+results_list_mid[[4]] = tradePerformance(arbs_mid_4_opps_spreads)
+results_list_mid[[5]] = tradePerformance(arbs_mid_5_opps_spreads)
+results_list_mid[[6]] = tradePerformance(arbs_mid_6_opps_spreads)
+results_list_mid[[7]] = tradePerformance(arbs_mid_7_opps_spreads)
+results_list_mid[[8]] = tradePerformance(arbs_mid_8_opps_spreads)
+
+exportResults(results_list_mid, "secondBacktest_mid_optimize.csv")
+
+# for(i in (1:(length(rel_val_arbs_all_strucs)))){
+#   if(nrow(rel_val_arbs_all_strucs[i]) != 0)){#if there actual trades to test
+#     #arb_opps <- trackArbOpps(rel_val_arbs_all_strucs[i], fedYieldCurveModern, 5, )
+#     fileName_struc <- names(rel_val_arbs_all_strucs[i])
+#     #print(strsplit(fileName_struc, "-"))
+#     fileName_ending <- "backtest.csv"
+#     fileName = paste(fileName_struc, fileName_ending)
+#   }
+# }
+
+#This function takes 
+#-df_spreads, an xts containing spread data
+#-timeFrame, our holding time of the trade, usually in days
+#and returns an xts with 
+#row x column n being change of rates of trade x of maturity 1 at time n
+#row x column 2n being change of rates of trade x of maturity 2 at time n
+#How this function defines a trade (relative value)
+#1. Find the actual yield curve point who is closest to the NS model (selectivity based on the middle point of the relative val trade)
+#2. Find the actual yield curve points who are the farthest from the NS model
+#3. Track the performance of the trade for the given holding period (timeFrame)
+trackMaxArbOpps <- function(df_spreads, timeFrame){
+  index = index(df_spreads)#the index of our returned xts needs to match the index tracking
+  #our arb opportunities; our trades are tracked by the date which we execute them
+  coreMatrix = matrix(ncol = timeFrame * 2, nrow = nrow(df_spreads))
+  for(row in (1:nrow(df_spreads))){
+    mid_term <- which.min(apply(abs(df_spreads[row,]), MARGIN = 2, min))#the middle yield of our relative value trade
+    spreads_before <- df_spreads[row,(1:mid_term)]#xts containing all spreads in tenors before the middle tenor
+    spreads_after <- df_spreads[row,mid_term:ncol(big_table)]#xts containing all spreads in tenors after the middle tenor
+    before_term <- which.min(apply(abs(spreads_before), MARGIN = 2, min))
+    after_term <- which.min(apply(abs(spreads_after), MARGIN = 2, min))
+    orig_curve_date = index(df_spreads[row])
+    sliced_df_spreads = df_spreads[paste(orig_curve_date,"/")]#create a smaller xts starting with the yield curve where the trade is executed
+    i = 2
+    while(i <= timeFrame+1){#put the rates over the specified timeframe into our xts
+      if(i-1 > nrow(sliced_df_spreads)){#if timeFrame goes further than we have data for
+        #stop adding to the dataframe, just have NAs in place 
+        break
+      }
+      coreMatrix[row, 2*(i-1)-1] = sliced_df_spreads[i-1,before_term]
+      coreMatrix[row, 2*(i-1)] = sliced_df_spreads[i-1, after_term]
+      i = i + 1
+    }
+  }
+  final_xts = xts(x = coreMatrix, order.by = index)
+  return(final_xts)
+}
+
+#Third backtest, note to self, run this backtest on 2000-2008 data
+#Use the trackArbOpps function instead to find arbs
+#The methodology of this test is different
+#instead of specifying maturities and minimum spreads we want to make
+#we just trade the best possible relative value arb that exists on the curve
+#as in we get the smallest possible mid spread first (optimizing for midspread)
+#then we get the biggest spreads on each side of the mid tenor regardless of their tenor
+
+maxArbSpreads_5 <- trackMaxArbOpps(big_table, 5)
+maxArbCalc_5 <- arbSpreadCalc(maxArbSpreads_5)
+maxArbResults_5 <- tradePerformance(maxArbCalc_5)
+
+maxArbSpreads_10 <- trackMaxArbOpps(big_table, 10)
+maxArbCalc_10 <- arbSpreadCalc(maxArbSpreads_10)
+maxArbResults_10 <- tradePerformance(maxArbCalc_10)
+
+maxArbSpreads_15 <- trackMaxArbOpps(big_table, 15)
+maxArbCalc_15 <- arbSpreadCalc(maxArbSpreads_15)
+maxArbResults_15 <- tradePerformance(maxArbCalc_15)
+
+maxArbSpreads_list <- vector("list", 30)
+
+for(i in (31:60)){#i is the holding period of a trade
+  maxArbSpreads <- trackMaxArbOpps(big_table, i)
+  maxArbCalc <- arbSpreadCalc(maxArbSpreads)
+  maxArbResults <- tradePerformance(maxArbCalc)
+  maxArbSpreads_list[[i-30]] <- maxArbResults
+}
+
+exportResults(maxArbSpreads_list, "third_backtest_pt2.csv")
+
+#Fourth backtest
+#Same as third backtest except we are now testing on 2000-2008
+
+maxArbSpreads_lost_decade_list <- vector("list", 60)
+for(i in (1:60)){#i is the holding period of a trade
+  maxArbSpreads <- trackMaxArbOpps(big_table_lost_decade, i)
+  maxArbCalc <- arbSpreadCalc(maxArbSpreads)
+  maxArbResults <- tradePerformance(maxArbCalc)
+  maxArbSpreads_lost_decade_list[[i]] <- maxArbResults
+}
+
+exportResults(maxArbSpreads_lost_decade_list, "fourth_backtest.csv")
+
+#Fifth backtest
+#Same as third backtest except we are now testing on 1990-1999
+maxArbSpreads_90s_bull_list <- vector("list", 60)
+for(i in (1:60)){#i is the holding period of a trade
+  maxArbSpreads <- trackMaxArbOpps(big_table_90s_bull, i)
+  maxArbCalc <- arbSpreadCalc(maxArbSpreads)
+  maxArbResults <- tradePerformance(maxArbCalc)
+  maxArbSpreads_90s_bull_list[[i]] <- maxArbResults
+}
+
+exportResults(maxArbSpreads_90s_bull_list, "fifth_backtest.csv")
+
+#Sixth backtest
+#Same as third backtest except we are now testing on 1980-1989
+#This doesn't work yet, but might be pointless to do now
+maxArbSpreads_80s <- vector("list", 60)
+for(i in (1:60)){#i is the holding period of a trade
+  maxArbSpreads <- trackMaxArbOpps(big_table_80s, i)
+  maxArbCalc <- arbSpreadCalc(maxArbSpreads)
+  maxArbResults <- tradePerformance(maxArbCalc)
+  maxArbSpreads_80s[[i]] <- maxArbResults
+}
+
+exportResults(maxArbSpreads_80s, "fifth_backtest.csv")
